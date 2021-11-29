@@ -1,0 +1,157 @@
+pipeline{
+	agent any
+	
+	triggers {
+		pollSCM('*/3 * * *') //3분주기
+	}
+	
+	environment {
+		AWS_ACCESS_KEY_ID = credentials('awsAccessKeyId')
+		AWS_SECRETE_ACCESS_KEY_ID = credentials('awsSecretAccessKey')
+		AWS_DEFAULT_REGION = 'ap-nottheast-2'
+		HOME = '.'
+	}
+	
+	stages {
+		stage('Prepare'){		
+			agent any
+			
+			steps{
+				echo "Lets start Long Journey! ENV: ${ENV}"
+				echo "Clonning REpository"
+				
+				git url: 'https://github.com/cs01532/Tacademy.git',
+					branch: 'master',								//pull 대상
+					credentialsId: 'jenkinsgit'
+			}
+			
+			post {
+				success {
+					echo 'Successfully Cloned Repository'
+				}
+				
+				always {
+					echo 'I tried....'
+				}
+				
+				cleanup {
+					echo 'after all other post condition'
+				}
+		}
+	}
+		
+		stage('Deploy Frontend'){
+			steps {
+				echo 'Deploying Frontend'
+				
+				dir('./website'){
+				sh '''
+				aws s3 sync ./ s3://jschoi
+				'''
+				
+				}
+			}
+			
+			post {
+				success {
+					echo 'Successfully Cloned Repository'
+					
+					mail to: 'cs01532@gmail.com',
+						subject: "Deploy Frontend Success",
+						body: "Successfully deployed frontend!"
+				}
+				
+				fail {
+					echo 'I failed :('
+					
+					mail to: 'cs01532@gmail.com',
+						subject: "failed Pipelinee",
+						body: "Something is wrong with deploy frontend"
+				}
+			}
+		}
+
+		stage('Lint Backend'){
+			agent {
+				docker {
+					image 'node:latest'
+				}
+			}
+			
+			steps {
+				dir ('./server'){
+					sh '''
+					npm install&&
+					npm run lint
+					'''
+				}
+			}
+		}
+
+		stage('Test Backend'){
+			agent{
+				docker {
+					image 'node:latest'
+				}
+			}
+			
+			steps{
+				echo 'Test Backend'
+				
+				dir ('./server'){
+					sh '''
+					npm install&&
+					npm run test
+					'''
+				}
+			}
+		}
+
+		stage('Build Backend'){
+			agent any
+			
+			steps{
+				echo 'Build Backend'
+				
+				dir ('./server'){
+					sh """
+					docker build . -t server --build-arg env=${PROD}
+					"""
+				}
+			}
+			
+			post{
+				failure {
+					error 'This pipeline stops here...'
+				}
+			}
+		
+		}
+		
+		stage('Deploy Backend'){
+			agent any
+			
+			steps{
+				echo 'Deploy Backend'
+				
+				dir ('./server'){
+					sh """
+					//docker rm -f $(docker ps -aq)
+					docker run -p 80:80 -d server
+					"""
+				}
+			}
+			
+			post{
+				success {
+					echo 'Successfully Cloned Repository'
+					
+					mail to: 'cs01532@gmail.com',
+						subject: "Deploy Success",
+						body: "Successfully deployed!"
+				}
+
+			}
+		
+		}		
+}
